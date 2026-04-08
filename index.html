@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="es-CL">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grabadora de Aula Pro</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+    <style>
+        :root {
+            --bg:#121212; --card:#1e1e1e; --text:#e0e0e0;
+            --accent:#3d5afe; --danger:#ff5252; --success:#00e676; --warning:#ffea00;
+        }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); margin:0; padding:15px; display:flex; justify-content:center; }
+        .app-card { width:100%; max-width:800px; background:var(--card); border-radius:20px; padding:25px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        h1 { text-align:center; font-size: 1.5rem; margin-bottom: 20px; }
+        #status { text-align: center; margin-bottom: 5px; color: var(--success); font-weight: bold; }
+        #timer { text-align: center; font-family: monospace; font-size: 2.5rem; margin-bottom: 20px; }
+        #output { height:350px; border:1px solid #333; border-radius:12px; padding:20px; overflow-y:auto; background:#000; margin-bottom:20px; line-height: 1.6; color: #94a3b8; white-space: pre-wrap; font-size: 1rem; }
+        .controls { display:grid; grid-template-columns:1fr 1fr; gap:15px; }
+        button { padding:20px; border:none; border-radius:15px; font-weight:bold; cursor: pointer; font-size: 1rem; }
+        button:disabled { opacity: 0.3; }
+        .btn-start { background:var(--success); color:#000; grid-column:span 2; }
+        .btn-pause { background:var(--warning); color:#000; }
+        .btn-stop { background:var(--danger); color:#fff; }
+        .btn-download { background: var(--accent); color:#fff; grid-column:span 2; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="app-card">
+    <h1>Grabadora de Aula</h1>
+    <div id="status">● DISPOSITIVO LISTO</div>
+    <div id="timer">00:00:00</div>
+    <div id="output">El texto aparecerá aquí mientras hablas...</div>
+
+    <div class="controls">
+        <button id="startBtn" class="btn-start">INICIAR SESIÓN</button>
+        <button id="pauseBtn" class="btn-pause" disabled>PAUSAR</button>
+        <button id="stopBtn" class="btn-stop" disabled>DETENER</button>
+        <button id="downloadBtn" class="btn-download" style="display:none;">DESCARGAR ZIP (AUDIO + PDF)</button>
+    </div>
+</div>
+
+<script>
+/* global jspdf, JSZip */
+let mediaRecorder, chunks = [], recognition, startTime, timerId, elapsed = 0;
+let isPaused = false, fullText = "";
+
+const startBtn = document.getElementById('startBtn');
+const pauseBtn = document.getElementById('pauseBtn');
+const stopBtn = document.getElementById('stopBtn');
+const downloadBtn = document.getElementById('downloadBtn');
+const output = document.getElementById('output');
+const timer = document.getElementById('timer');
+const status = document.getElementById('status');
+
+// --- MOTOR DE TRANSCRIPCIÓN NATIVO (NO CONSUME RAM) ---
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (SpeechRecognition) {
+    recognition = new SpeechRecognition();
+    recognition.lang = 'es-CL';
+    recognition.continuous = true;
+    recognition.interimResults = true;
+
+    recognition.onresult = (event) => {
+        let interimTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) {
+                fullText += event.results[i][0].transcript + '. ';
+            } else {
+                interimTranscript += event.results[i][0].transcript;
+            }
+        }
+        output.innerText = (fullText + interimTranscript).trim();
+        output.scrollTop = output.scrollHeight;
+    };
+
+    recognition.onerror = (event) => {
+        console.error("Error de reconocimiento:", event.error);
+        if (event.error === 'no-speech') restartRecognition();
+    };
+
+    recognition.onend = () => { if (!isPaused && startBtn.disabled) recognition.start(); };
+}
+
+function restartRecognition() {
+    if (recognition && !isPaused) {
+        try { recognition.stop(); } catch(e) {}
+        setTimeout(() => { if (!isPaused) recognition.start(); }, 500);
+    }
+}
+
+// --- CONTROLES ---
+startBtn.onclick = async () => {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        // Configuración para que el audio sea AUDIO y no VIDEO
+        const options = { mimeType: 'audio/webm;codecs=opus' };
+        if (!MediaRecorder.isTypeSupported(options.mimeType)) options.mimeType = '';
+
+        mediaRecorder = new MediaRecorder(stream, options);
+        chunks = [];
+        mediaRecorder.ondataavailable = e => chunks.push(e.data);
+        
+        mediaRecorder.start();
+        if (recognition) {
+            fullText = "";
+            output.innerText = "";
+            recognition.start();
+        }
+        
+        startTime = Date.now();
+        timerId = setInterval(updateTimer, 1000);
+
+        startBtn.disabled = true;
+        pauseBtn.disabled = false;
+        stopBtn.disabled = false;
+        downloadBtn.style.display = 'none';
+        status.innerText = "● GRABANDO";
+        status.style.color = "var(--success)";
+    } catch (err) {
+        alert("Error: Debes permitir el acceso al micrófono.");
+    }
+};
+
+pauseBtn.onclick = () => {
+    if (!isPaused) {
+        mediaRecorder.pause();
+        if (recognition) recognition.stop();
+        isPaused = true;
+        clearInterval(timerId);
+        elapsed += Date.now() - startTime;
+        pauseBtn.innerText = "REANUDAR";
+        status.innerText = "● EN PAUSA";
+    } else {
+        mediaRecorder.resume();
+        if (recognition) recognition.start();
+        isPaused = false;
+        startTime = Date.now();
+        timerId = setInterval(updateTimer, 1000);
+        pauseBtn.innerText = "PAUSAR";
+        status.innerText = "● GRABANDO";
+    }
+};
+
+function updateTimer() {
+    const currentElapsed = elapsed + (Date.now() - startTime);
+    const d = new Date(currentElapsed);
+    timer.innerText = d.toISOString().substr(11, 8);
+}
+
+stopBtn.onclick = () => {
+    mediaRecorder.stop();
+    if (recognition) recognition.stop();
+    mediaRecorder.stream.getTracks().forEach(t => t.stop());
+    clearInterval(timerId);
+    
+    startBtn.disabled = false;
+    pauseBtn.disabled = true;
+    stopBtn.disabled = true;
+    downloadBtn.style.display = 'block';
+    status.innerText = "SESIÓN FINALIZADA";
+};
+
+downloadBtn.onclick = async () => {
+    const zip = new JSZip();
+    const ts = Date.now();
+
+    // Guardar audio como .mp3 (usando extensión para que Android lo reconozca)
+    const audioBlob = new Blob(chunks, { type: 'audio/mpeg' });
+    zip.file(`Audio_Clase_${ts}.mp3`, audioBlob);
+
+    // Guardar PDF con el texto actual de la pantalla
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    doc.setFont("times", "normal");
+    doc.setFontSize(14);
+    doc.text("Transcripción de Sesión", 20, 20);
+    doc.setFontSize(11);
+    
+    const content = output.innerText || "No se detectó texto en esta sesión.";
+    const lines = doc.splitTextToSize(content, 170);
+    doc.text(lines, 20, 30);
+    
+    const pdfBlob = doc.output("blob");
+    zip.file(`Texto_Clase_${ts}.pdf`, pdfBlob);
+
+    const zipBlob = await zip.generateAsync({ type: "blob" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(zipBlob);
+    a.download = `Sesion_Aula_${ts}.zip`;
+    a.click();
+};
+</script>
+</body>
+</html>
