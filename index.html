@@ -4,127 +4,88 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Grabadora de Aula Pro</title>
-    
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-
     <style>
-        :root {
-            --bg:#121212; --card:#1e1e1e; --text:#e0e0e0;
-            --accent:#3d5afe; --danger:#ff5252; --success:#00e676; --warning:#ffea00;
-        }
-        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); margin:0; padding:15px; display:flex; justify-content:center; }
-        .app-card { width:100%; max-width:800px; background:var(--card); border-radius:20px; padding:25px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-        h1 { text-align:center; font-size: 1.5rem; margin-bottom: 20px; }
-        #status { text-align: center; margin-bottom: 5px; color: var(--success); font-weight: bold; }
-        #timer { text-align: center; font-family: monospace; font-size: 2.5rem; margin-bottom: 20px; }
-        #output { height:350px; border:1px solid #333; border-radius:12px; padding:20px; overflow-y:auto; background:#000; margin-bottom:20px; line-height: 1.6; color: #94a3b8; white-space: pre-wrap; font-size: 1rem; }
-        .controls { display:grid; grid-template-columns:1fr 1fr; gap:15px; }
-        button { padding:20px; border:none; border-radius:15px; font-weight:bold; cursor: pointer; font-size: 1rem; }
-        button:disabled { opacity: 0.3; }
-        .btn-start { background:var(--success); color:#000; grid-column:span 2; }
+        :root { --bg:#000; --card:#111; --text:#fff; --accent:#3d5afe; --danger:#ff5252; --success:#00e676; --warning:#ffea00; }
+        body { font-family: sans-serif; background: var(--bg); color: var(--text); margin:0; padding:10px; }
+        .app-card { width:100%; max-width:600px; margin:auto; background:var(--card); border-radius:15px; padding:20px; border:1px solid #333; }
+        #timer { text-align: center; font-size: 3rem; margin: 10px 0; font-family: monospace; }
+        #output { height:380px; border:1px solid #444; border-radius:10px; padding:15px; overflow-y:auto; background:#050505; margin-bottom:15px; font-size: 1.1rem; white-space: pre-wrap; color: #00e676; }
+        .grid { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+        button { padding:18px; border:none; border-radius:10px; font-weight:bold; cursor: pointer; }
+        .btn-start { background:var(--success); grid-column: span 2; color:#000; }
         .btn-pause { background:var(--warning); color:#000; }
         .btn-stop { background:var(--danger); color:#fff; }
-        .btn-download { background: var(--accent); color:#fff; grid-column:span 2; margin-top: 10px; }
+        .btn-dl { background:var(--accent); color:#fff; grid-column: span 2; margin-top: 10px; }
     </style>
 </head>
 <body>
 
 <div class="app-card">
-    <h1>Grabadora de Aula</h1>
-    <div id="status">● DISPOSITIVO LISTO</div>
     <div id="timer">00:00:00</div>
-    <div id="output">El texto aparecerá aquí mientras hablas...</div>
+    <div id="output">Escribe o dicta aquí...</div>
 
-    <div class="controls">
-        <button id="startBtn" class="btn-start">INICIAR SESIÓN</button>
+    <div class="grid">
+        <button id="startBtn" class="btn-start">INICIAR GRABACIÓN Y TEXTO</button>
         <button id="pauseBtn" class="btn-pause" disabled>PAUSAR</button>
         <button id="stopBtn" class="btn-stop" disabled>DETENER</button>
-        <button id="downloadBtn" class="btn-download" style="display:none;">DESCARGAR ZIP (AUDIO + PDF)</button>
+        <button id="downloadBtn" class="btn-dl" style="display:none;">DESCARGAR TODO (.ZIP)</button>
     </div>
 </div>
 
 <script>
-/* global jspdf, JSZip */
 let mediaRecorder, chunks = [], recognition, startTime, timerId, elapsed = 0;
-let isPaused = false, fullText = "";
+let isPaused = false;
 
-const startBtn = document.getElementById('startBtn');
-const pauseBtn = document.getElementById('pauseBtn');
-const stopBtn = document.getElementById('stopBtn');
-const downloadBtn = document.getElementById('downloadBtn');
-const output = document.getElementById('output');
-const timer = document.getElementById('timer');
-const status = document.getElementById('status');
+const startBtn = document.getElementById("startBtn");
+const pauseBtn = document.getElementById("pauseBtn");
+const stopBtn = document.getElementById("stopBtn");
+const downloadBtn = document.getElementById("downloadBtn");
+const output = document.getElementById("output");
+const timerDisp = document.getElementById("timer");
 
-// --- MOTOR DE TRANSCRIPCIÓN NATIVO (NO CONSUME RAM) ---
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-if (SpeechRecognition) {
-    recognition = new SpeechRecognition();
+// RECONOCIMIENTO NATIVO
+const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (Speech) {
+    recognition = new Speech();
     recognition.lang = 'es-CL';
     recognition.continuous = true;
     recognition.interimResults = true;
 
-    recognition.onresult = (event) => {
-        let interimTranscript = '';
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-            if (event.results[i].isFinal) {
-                fullText += event.results[i][0].transcript + '. ';
-            } else {
-                interimTranscript += event.results[i][0].transcript;
-            }
+    recognition.onresult = (e) => {
+        let text = "";
+        for (let i = 0; i < e.results.length; i++) {
+            text += e.results[i][0].transcript + (e.results[i].isFinal ? ". " : "");
         }
-        output.innerText = (fullText + interimTranscript).trim();
+        output.innerText = text; // Escribe directamente en la pantalla
         output.scrollTop = output.scrollHeight;
     };
-
-    recognition.onerror = (event) => {
-        console.error("Error de reconocimiento:", event.error);
-        if (event.error === 'no-speech') restartRecognition();
-    };
-
-    recognition.onend = () => { if (!isPaused && startBtn.disabled) recognition.start(); };
+    recognition.onend = () => { if(!isPaused && startBtn.disabled) recognition.start(); };
 }
 
-function restartRecognition() {
-    if (recognition && !isPaused) {
-        try { recognition.stop(); } catch(e) {}
-        setTimeout(() => { if (!isPaused) recognition.start(); }, 500);
-    }
-}
-
-// --- CONTROLES ---
 startBtn.onclick = async () => {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        
-        // Configuración para que el audio sea AUDIO y no VIDEO
-        const options = { mimeType: 'audio/webm;codecs=opus' };
-        if (!MediaRecorder.isTypeSupported(options.mimeType)) options.mimeType = '';
-
-        mediaRecorder = new MediaRecorder(stream, options);
+        mediaRecorder = new MediaRecorder(stream);
         chunks = [];
         mediaRecorder.ondataavailable = e => chunks.push(e.data);
-        
         mediaRecorder.start();
+        
         if (recognition) {
-            fullText = "";
             output.innerText = "";
             recognition.start();
         }
-        
-        startTime = Date.now();
-        timerId = setInterval(updateTimer, 1000);
 
-        startBtn.disabled = true;
-        pauseBtn.disabled = false;
-        stopBtn.disabled = false;
-        downloadBtn.style.display = 'none';
-        status.innerText = "● GRABANDO";
-        status.style.color = "var(--success)";
-    } catch (err) {
-        alert("Error: Debes permitir el acceso al micrófono.");
-    }
+        startTime = Date.now();
+        timerId = setInterval(() => {
+            const d = new Date(elapsed + (Date.now() - startTime));
+            timerDisp.innerText = d.toISOString().substr(11, 8);
+        }, 1000);
+
+        startBtn.disabled = true; pauseBtn.disabled = false; stopBtn.disabled = false;
+        downloadBtn.style.display = "none";
+    } catch (err) { alert("Activa el micrófono"); }
 };
 
 pauseBtn.onclick = () => {
@@ -135,64 +96,55 @@ pauseBtn.onclick = () => {
         clearInterval(timerId);
         elapsed += Date.now() - startTime;
         pauseBtn.innerText = "REANUDAR";
-        status.innerText = "● EN PAUSA";
     } else {
         mediaRecorder.resume();
         if (recognition) recognition.start();
         isPaused = false;
         startTime = Date.now();
-        timerId = setInterval(updateTimer, 1000);
+        timerId = setInterval(() => {
+            const d = new Date(elapsed + (Date.now() - startTime));
+            timerDisp.innerText = d.toISOString().substr(11, 8);
+        }, 1000);
         pauseBtn.innerText = "PAUSAR";
-        status.innerText = "● GRABANDO";
     }
 };
-
-function updateTimer() {
-    const currentElapsed = elapsed + (Date.now() - startTime);
-    const d = new Date(currentElapsed);
-    timer.innerText = d.toISOString().substr(11, 8);
-}
 
 stopBtn.onclick = () => {
     mediaRecorder.stop();
     if (recognition) recognition.stop();
     mediaRecorder.stream.getTracks().forEach(t => t.stop());
     clearInterval(timerId);
-    
-    startBtn.disabled = false;
-    pauseBtn.disabled = true;
-    stopBtn.disabled = true;
-    downloadBtn.style.display = 'block';
-    status.innerText = "SESIÓN FINALIZADA";
+    startBtn.disabled = false; pauseBtn.disabled = true; stopBtn.disabled = true;
+    downloadBtn.style.display = "block";
 };
 
 downloadBtn.onclick = async () => {
     const zip = new JSZip();
     const ts = Date.now();
 
-    // Guardar audio como .mp3 (usando extensión para que Android lo reconozca)
-    const audioBlob = new Blob(chunks, { type: 'audio/mpeg' });
-    zip.file(`Audio_Clase_${ts}.mp3`, audioBlob);
+    // AUDIO - Forzado como archivo de audio
+    const audioBlob = new Blob(chunks, { type: 'audio/mp3' });
+    zip.file(`Audio_${ts}.mp3`, audioBlob);
 
-    // Guardar PDF con el texto actual de la pantalla
+    // PDF - Captura lo que está escrito en el elemento 'output' ahora mismo
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
+    doc.setFont("times", "bold");
+    doc.text("Transcripción de Aula", 20, 20);
     doc.setFont("times", "normal");
-    doc.setFontSize(14);
-    doc.text("Transcripción de Sesión", 20, 20);
-    doc.setFontSize(11);
     
-    const content = output.innerText || "No se detectó texto en esta sesión.";
-    const lines = doc.splitTextToSize(content, 170);
+    // ESTA LÍNEA ES LA CLAVE: Captura el texto visual directamente
+    const textoParaGuardar = output.innerText; 
+    const lines = doc.splitTextToSize(textoParaGuardar, 170);
     doc.text(lines, 20, 30);
     
     const pdfBlob = doc.output("blob");
-    zip.file(`Texto_Clase_${ts}.pdf`, pdfBlob);
+    zip.file(`Texto_${ts}.pdf`, pdfBlob);
 
     const zipBlob = await zip.generateAsync({ type: "blob" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(zipBlob);
-    a.download = `Sesion_Aula_${ts}.zip`;
+    a.download = `Clase_${ts}.zip`;
     a.click();
 };
 </script>
